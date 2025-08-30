@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+option go_package = "./pkg/sendEmail.v1";
+
+package sendEmail.v1;
+
+message SendEmail {
+  repeated string To = 1;
+  string Subject = 2;
+  string Template = 3;
+  map<string, string> Params = 4;
+}

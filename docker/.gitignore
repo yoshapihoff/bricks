@@ -1,0 +1,19 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Volume directories
+**/data/
+**/volumes/
+
+# Docker Compose override files
+docker-compose.override.yml
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+
+# Logs
+*.log
