@@ -4,7 +4,8 @@
 !.env.example
 
 # Volume directories
-**/data/
+**/postgres_data/
+**/valkey_data/
 **/volumes/
 
 # Docker Compose override files

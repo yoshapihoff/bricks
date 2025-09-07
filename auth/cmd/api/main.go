@@ -12,7 +12,6 @@ import (
 	"github.com/gorilla/mux"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/yoshapihoff/bricks/auth/internal/auth"
-	"github.com/yoshapihoff/bricks/auth/internal/auth/oauth"
 	"github.com/yoshapihoff/bricks/auth/internal/config"
 	"github.com/yoshapihoff/bricks/auth/internal/db"
 	httpHandler "github.com/yoshapihoff/bricks/auth/internal/handler/http"
@@ -44,36 +43,6 @@ func main() {
 		Expiration: cfg.JWT.Expiration,
 	})
 
-	// Initialize OAuth service
-	oauthCfg := oauth.Config{
-		Google: struct {
-			ClientID     string
-			ClientSecret string
-		}{
-			ClientID:     cfg.OAuth.Google.ClientID,
-			ClientSecret: cfg.OAuth.Google.ClientSecret,
-		},
-		GitHub: struct {
-			ClientID     string
-			ClientSecret string
-		}{
-			ClientID:     cfg.OAuth.GitHub.ClientID,
-			ClientSecret: cfg.OAuth.GitHub.ClientSecret,
-		},
-		VK: struct {
-			ClientID     string
-			ClientSecret string
-			APIVersion   string
-		}{
-			ClientID:     cfg.OAuth.VK.ClientID,
-			ClientSecret: cfg.OAuth.VK.ClientSecret,
-			APIVersion:   cfg.OAuth.VK.APIVersion,
-		},
-		RedirectURL: cfg.OAuth.RedirectURL,
-	}
-
-	oauthSvc := oauth.NewService(oauthCfg)
-
 	// Initialize services
 	userSvc := service.NewUserService(userRepo, jwtSvc)
 	passwordResetTokenSvc := service.NewPasswordResetTokenService(postgresRepo.NewPasswordResetTokenRepository(dbConn), userSvc)
@@ -91,7 +60,6 @@ func main() {
 	// Create handler
 	handler := httpHandler.NewAuthHandler(
 		userSvc,
-		oauthSvc,
 		jwtSvc,
 		passwordResetTokenSvc,
 		cfg.PasswordResetTokenExpiration,

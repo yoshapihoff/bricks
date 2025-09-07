@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/yoshapihoff/bricks/auth/internal/auth"
-	"github.com/yoshapihoff/bricks/auth/internal/auth/oauth"
 	"github.com/yoshapihoff/bricks/auth/internal/domain"
 	"github.com/yoshapihoff/bricks/auth/internal/kafka/producers"
 )
@@ -65,7 +63,6 @@ type OAuthCallbackResponse struct {
 type AuthHandler struct {
 	userService                  domain.UserService
 	jwtSvc                       *auth.JWTService
-	oauthSvc                     *oauth.Service
 	passwordResetTokenSvc        domain.PasswordResetTokenService
 	passwordResetTokenExpiration time.Duration
 	forgotPasswordEmailProducer  *producers.ForgotPasswordEmailProducer
@@ -73,7 +70,6 @@ type AuthHandler struct {
 
 func NewAuthHandler(
 	userService domain.UserService,
-	oauthSvc *oauth.Service,
 	jwtSvc *auth.JWTService,
 	passwordResetTokenSvc domain.PasswordResetTokenService,
 	passwordResetTokenExpiration time.Duration,
@@ -82,7 +78,6 @@ func NewAuthHandler(
 	return &AuthHandler{
 		userService:                  userService,
 		jwtSvc:                       jwtSvc,
-		oauthSvc:                     oauthSvc,
 		passwordResetTokenSvc:        passwordResetTokenSvc,
 		passwordResetTokenExpiration: passwordResetTokenExpiration,
 		forgotPasswordEmailProducer:  forgotPasswordEmailProducer,
@@ -97,10 +92,6 @@ func (h *AuthHandler) RegisterRoutes(router *mux.Router) {
 	authRouter.HandleFunc("/login", h.handleLogin).Methods("POST")
 	authRouter.HandleFunc("/forgot-password", h.handleForgotPassword).Methods("POST")
 	authRouter.HandleFunc("/receive-password-reset-token/{token}", h.handleReceivePasswordResetToken).Methods("GET")
-
-	// OAuth routes
-	authRouter.HandleFunc("/oauth/{provider}", h.handleOAuthStart).Methods("GET")
-	authRouter.HandleFunc("/oauth/{provider}/callback", h.handleOAuthCallback).Methods("GET")
 
 	// Protected routes
 	protected := authRouter.PathPrefix("/me").Subrouter()
@@ -251,104 +242,6 @@ func (h *AuthHandler) handleChangePassword(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *AuthHandler) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
-	provider := mux.Vars(r)["provider"]
-	state := uuid.New().String()
-
-	// Store state in session or secure cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "oauth_state",
-		Value:    state,
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(10 * time.Minute),
-	})
-
-	url, err := h.oauthSvc.GetAuthURL(provider, state)
-	if err != nil {
-		handleError(w, err)
-		return
-	}
-
-	h.respondWithJSON(w, http.StatusOK, &OAuthStartResponse{
-		URL: url,
-	})
-}
-
-func (h *AuthHandler) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
-	// Verify state
-	state := r.URL.Query().Get("state")
-	cookie, err := r.Cookie("oauth_state")
-	if err != nil || cookie.Value != state {
-		http.Error(w, "invalid state", http.StatusBadRequest)
-		return
-	}
-
-	provider := mux.Vars(r)["provider"]
-	code := r.URL.Query().Get("code")
-	if code == "" {
-		http.Error(w, "authorization code not found", http.StatusBadRequest)
-		return
-	}
-
-	// Exchange code for token
-	token, err := h.oauthSvc.ExchangeCode(r.Context(), provider, code)
-	if err != nil {
-		handleError(w, fmt.Errorf("failed to exchange code: %v", err))
-		return
-	}
-
-	// Get user info
-	userInfo, err := h.oauthSvc.GetUserInfo(r.Context(), provider, token)
-	if err != nil {
-		handleError(w, fmt.Errorf("failed to get user info: %v", err))
-		return
-	}
-
-	// Extract email and name from user info
-	email := userInfo.Email
-	name := userInfo.Name
-	if name == "" {
-		name = userInfo.Username // Fallback for GitHub
-	}
-
-	if email == "" {
-		handleError(w, fmt.Errorf("email is required but not provided by the OAuth provider"))
-		return
-	}
-
-	// Check if user exists
-	user, err := h.userService.GetUserByEmail(r.Context(), email)
-	if err != nil && !errors.Is(err, domain.ErrUserNotFound) {
-		handleError(w, err)
-		return
-	}
-
-	// Create new user if not exists
-	if user == nil {
-		// Generate a random password for OAuth users
-		password := uuid.New().String()
-		user, err = h.userService.Register(r.Context(), email, password, name)
-		if err != nil {
-			handleError(w, err)
-			return
-		}
-	}
-
-	// Generate JWT token
-	tokenString, err := h.jwtSvc.GenerateToken(user.ID, user.Email)
-	if err != nil {
-		handleError(w, err)
-		return
-	}
-
-	h.respondWithJSON(w, http.StatusOK, &OAuthCallbackResponse{
-		Token: tokenString,
-		User:  user,
-	})
 }
 
 func (h *AuthHandler) authMiddleware(next http.Handler) http.Handler {

@@ -22,19 +22,6 @@ type JWTConfig struct {
 	Expiration time.Duration
 }
 
-type OAuthProviderConfig struct {
-	ClientID     string
-	ClientSecret string
-	APIVersion   string
-}
-
-type OAuthConfig struct {
-	Google      OAuthProviderConfig
-	GitHub      OAuthProviderConfig
-	VK          OAuthProviderConfig
-	RedirectURL string
-}
-
 type ServerConfig struct {
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
@@ -49,7 +36,6 @@ type KafkaConfig struct {
 type Config struct {
 	DB                              DBConfig
 	JWT                             JWTConfig
-	OAuth                           OAuthConfig
 	Server                          ServerConfig
 	Kafka                           KafkaConfig
 	AppPort                         string
@@ -69,24 +55,6 @@ func Load() (*Config, error) {
 	passwordResetTokenExpiration, err := time.ParseDuration(getEnv("PASSWORD_RESET_TOKEN_EXPIRATION"))
 	if err != nil {
 		return nil, err
-	}
-
-	// Initialize OAuth configuration
-	oauthConfig := OAuthConfig{
-		Google: OAuthProviderConfig{
-			ClientID:     getEnv("GOOGLE_CLIENT_ID"),
-			ClientSecret: getEnv("GOOGLE_CLIENT_SECRET"),
-		},
-		GitHub: OAuthProviderConfig{
-			ClientID:     getEnv("GITHUB_CLIENT_ID"),
-			ClientSecret: getEnv("GITHUB_CLIENT_SECRET"),
-		},
-		VK: OAuthProviderConfig{
-			ClientID:     getEnv("VK_CLIENT_ID"),
-			ClientSecret: getEnv("VK_CLIENT_SECRET"),
-			APIVersion:   getEnv("VK_API_VERSION"),
-		},
-		RedirectURL: getEnv("OAUTH_REDIRECT_URL"),
 	}
 
 	return &Config{
@@ -111,7 +79,6 @@ func Load() (*Config, error) {
 			KafkaUrl:          getEnv("KAFKA_URL"),
 			SchemaRegistryUrl: getEnv("SCHEMA_REGISTRY_URL"),
 		},
-		OAuth:                           oauthConfig,
 		AppPort:                         getEnv("PORT"),
 		PasswordResetTokenExpiration:    passwordResetTokenExpiration,
 		ForgotPasswordEmailSendingTopic: getEnv("FORGOT_PASSWORD_EMAIL_SENDING_TOPIC"),
