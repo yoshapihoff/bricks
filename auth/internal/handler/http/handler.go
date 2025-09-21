@@ -10,8 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/yoshapihoff/bricks/auth/internal/auth"
-	"github.com/yoshapihoff/bricks/auth/internal/domain"
+	"github.com/yoshapihoff/bricks/auth/internal/dto"
 	"github.com/yoshapihoff/bricks/auth/internal/kafka/producers"
+	"github.com/yoshapihoff/bricks/auth/internal/service"
 )
 
 type ErrorResponse struct {
@@ -38,8 +39,8 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Token string       `json:"token"`
-	User  *domain.User `json:"user"`
+	Token string    `json:"token"`
+	User  *dto.User `json:"user"`
 }
 
 type UpdateProfileRequest struct {
@@ -56,22 +57,22 @@ type OAuthStartResponse struct {
 }
 
 type OAuthCallbackResponse struct {
-	Token string       `json:"token"`
-	User  *domain.User `json:"user"`
+	Token string    `json:"token"`
+	User  *dto.User `json:"user"`
 }
 
 type AuthHandler struct {
-	userService                  domain.UserService
-	jwtSvc                       *auth.JWTService
-	passwordResetTokenSvc        domain.PasswordResetTokenService
+	userService                  service.UserService
+	jwtSvc                       *auth.DefaultJWTService
+	passwordResetTokenSvc        service.PasswordResetTokenService
 	passwordResetTokenExpiration time.Duration
 	forgotPasswordEmailProducer  *producers.ForgotPasswordEmailProducer
 }
 
 func NewAuthHandler(
-	userService domain.UserService,
-	jwtSvc *auth.JWTService,
-	passwordResetTokenSvc domain.PasswordResetTokenService,
+	userService service.UserService,
+	jwtSvc *auth.DefaultJWTService,
+	passwordResetTokenSvc service.PasswordResetTokenService,
 	passwordResetTokenExpiration time.Duration,
 	forgotPasswordEmailProducer *producers.ForgotPasswordEmailProducer,
 ) *AuthHandler {
@@ -286,13 +287,15 @@ func handleError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 
 	switch {
-	case errors.Is(err, domain.ErrUserNotFound):
+	case errors.Is(err, service.ErrUserNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, domain.ErrEmailExists):
+	case errors.Is(err, service.ErrEmailExists):
 		status = http.StatusConflict
-	case errors.Is(err, domain.ErrInvalidCredentials):
+	case errors.Is(err, service.ErrInvalidPassword):
 		status = http.StatusUnauthorized
-	case errors.Is(err, domain.ErrWeakPassword):
+	case errors.Is(err, service.ErrInvalidEmail):
+		status = http.StatusUnauthorized
+	case errors.Is(err, service.ErrWeakPassword):
 		status = http.StatusBadRequest
 	}
 

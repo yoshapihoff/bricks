@@ -28,18 +28,24 @@ type JWTConfig struct {
 	Expiration time.Duration
 }
 
-type JWTService struct {
+type JWTService interface {
+	GenerateToken(userID uuid.UUID, email string) (string, error)
+	ValidateToken(tokenString string) (*Claims, error)
+	Middleware() func(next http.Handler) http.Handler
+}
+
+type DefaultJWTService struct {
 	config JWTConfig
 }
 
-func NewJWTService(config JWTConfig) *JWTService {
-	return &JWTService{
+func NewJWTService(config JWTConfig) *DefaultJWTService {
+	return &DefaultJWTService{
 		config: config,
 	}
 }
 
 // GenerateToken creates a new JWT token for the given user
-func (s *JWTService) GenerateToken(userID uuid.UUID, email string) (string, error) {
+func (s *DefaultJWTService) GenerateToken(userID uuid.UUID, email string) (string, error) {
 	expirationTime := time.Now().Add(s.config.Expiration)
 
 	claims := &Claims{
@@ -58,7 +64,7 @@ func (s *JWTService) GenerateToken(userID uuid.UUID, email string) (string, erro
 }
 
 // ValidateToken validates the JWT token and returns the claims
-func (s *JWTService) ValidateToken(tokenString string) (*Claims, error) {
+func (s *DefaultJWTService) ValidateToken(tokenString string) (*Claims, error) {
 	keyFunc := func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -83,7 +89,7 @@ func (s *JWTService) ValidateToken(tokenString string) (*Claims, error) {
 }
 
 // Middleware returns a JWT authentication middleware
-func (s *JWTService) Middleware() func(next http.Handler) http.Handler {
+func (s *DefaultJWTService) Middleware() func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")

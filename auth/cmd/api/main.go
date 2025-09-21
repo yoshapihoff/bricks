@@ -16,7 +16,7 @@ import (
 	"github.com/yoshapihoff/bricks/auth/internal/db"
 	httpHandler "github.com/yoshapihoff/bricks/auth/internal/handler/http"
 	"github.com/yoshapihoff/bricks/auth/internal/kafka/producers"
-	postgresRepo "github.com/yoshapihoff/bricks/auth/internal/repository/postgres"
+	repo "github.com/yoshapihoff/bricks/auth/internal/repository"
 	"github.com/yoshapihoff/bricks/auth/internal/service"
 )
 
@@ -35,7 +35,7 @@ func main() {
 	defer dbConn.Close()
 
 	// Create repositories
-	userRepo := postgresRepo.NewUserRepository(dbConn)
+	userRepo := repo.NewUserRepository(dbConn)
 
 	// Initialize JWT service
 	jwtSvc := auth.NewJWTService(auth.JWTConfig{
@@ -45,7 +45,7 @@ func main() {
 
 	// Initialize services
 	userSvc := service.NewUserService(userRepo, jwtSvc)
-	passwordResetTokenSvc := service.NewPasswordResetTokenService(postgresRepo.NewPasswordResetTokenRepository(dbConn), userSvc)
+	passwordResetTokenSvc := service.NewPasswordResetTokenService(repo.NewPasswordResetTokenRepository(dbConn), userSvc)
 
 	// Initialize forgot password email Kafka producer
 	forgotPasswordEmailProducer, err := producers.NewForgotPasswordEmailProducer(cfg)

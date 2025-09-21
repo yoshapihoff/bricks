@@ -5,7 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/yoshapihoff/bricks/auth/internal/config"
-	postgresRepo "github.com/yoshapihoff/bricks/auth/internal/repository/postgres"
+	postgresRepo "github.com/yoshapihoff/bricks/auth/internal/repository"
 )
 
 // Init initializes the database connection and returns a *sql.DB instance

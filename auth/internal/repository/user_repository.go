@@ -1,24 +1,33 @@
-package postgres
+package repository
 
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/yoshapihoff/bricks/auth/internal/domain"
+	"github.com/yoshapihoff/bricks/auth/internal/dto"
 )
 
-type userRepository struct {
+type UserRepository interface {
+	Create(ctx context.Context, user *dto.User) error
+	FindByEmail(ctx context.Context, email string) (*dto.User, error)
+	FindByID(ctx context.Context, id uuid.UUID) (*dto.User, error)
+	UpdateEmail(ctx context.Context, userID uuid.UUID, email string) error
+	UpdatePasswordHash(ctx context.Context, userID uuid.UUID, passwordHash string) error
+	Delete(ctx context.Context, id uuid.UUID) error
+	CreateTables(ctx context.Context) error
+}
+
+type DefaultUserRepository struct {
 	db *sql.DB
 }
 
-func NewUserRepository(db *sql.DB) domain.UserRepository {
-	return &userRepository{db: db}
+func NewUserRepository(db *sql.DB) *DefaultUserRepository {
+	return &DefaultUserRepository{db: db}
 }
 
-func (r *userRepository) Create(ctx context.Context, user *domain.User) error {
+func (r *DefaultUserRepository) Create(ctx context.Context, user *dto.User) error {
 	query := `
 		INSERT INTO users (id, email, password_hash, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5)
@@ -46,14 +55,14 @@ func (r *userRepository) Create(ctx context.Context, user *domain.User) error {
 	return nil
 }
 
-func (r *userRepository) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
+func (r *DefaultUserRepository) FindByEmail(ctx context.Context, email string) (*dto.User, error) {
 	query := `
 		SELECT id, email, password_hash, created_at, updated_at
 		FROM users
 		WHERE email = $1
 	`
 
-	var user domain.User
+	var user dto.User
 	err := r.db.QueryRowContext(ctx, query, email).Scan(
 		&user.ID,
 		&user.Email,
@@ -63,23 +72,20 @@ func (r *userRepository) FindByEmail(ctx context.Context, email string) (*domain
 	)
 
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, domain.ErrUserNotFound
-		}
 		return nil, err
 	}
 
 	return &user, nil
 }
 
-func (r *userRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+func (r *DefaultUserRepository) FindByID(ctx context.Context, id uuid.UUID) (*dto.User, error) {
 	query := `
 		SELECT id, email, password_hash, created_at, updated_at
 		FROM users
 		WHERE id = $1
 	`
 
-	var user domain.User
+	var user dto.User
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&user.ID,
 		&user.Email,
@@ -89,16 +95,13 @@ func (r *userRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.Us
 	)
 
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, domain.ErrUserNotFound
-		}
 		return nil, err
 	}
 
 	return &user, nil
 }
 
-func (r *userRepository) UpdateEmail(ctx context.Context, userID uuid.UUID, email string) error {
+func (r *DefaultUserRepository) UpdateEmail(ctx context.Context, userID uuid.UUID, email string) error {
 	updatedAt := time.Now()
 
 	query := `
@@ -116,16 +119,13 @@ func (r *userRepository) UpdateEmail(ctx context.Context, userID uuid.UUID, emai
 	).Scan(&updatedAt)
 
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.ErrUserNotFound
-		}
 		return err
 	}
 
 	return nil
 }
 
-func (r *userRepository) UpdatePasswordHash(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+func (r *DefaultUserRepository) UpdatePasswordHash(ctx context.Context, userID uuid.UUID, passwordHash string) error {
 	updatedAt := time.Now()
 
 	query := `
@@ -143,37 +143,25 @@ func (r *userRepository) UpdatePasswordHash(ctx context.Context, userID uuid.UUI
 	).Scan(&updatedAt)
 
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.ErrUserNotFound
-		}
 		return err
 	}
 
 	return nil
 }
 
-func (r *userRepository) Delete(ctx context.Context, id uuid.UUID) error {
+func (r *DefaultUserRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM users WHERE id = $1`
 
-	result, err := r.db.ExecContext(ctx, query, id)
+	_, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
 		return err
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-
-	if rowsAffected == 0 {
-		return domain.ErrUserNotFound
 	}
 
 	return nil
 }
 
 // CreateTables creates the necessary database tables
-func (r *userRepository) CreateTables(ctx context.Context) error {
+func (r *DefaultUserRepository) CreateTables(ctx context.Context) error {
 	query := `
 		CREATE TABLE IF NOT EXISTS users (
 			id UUID PRIMARY KEY,

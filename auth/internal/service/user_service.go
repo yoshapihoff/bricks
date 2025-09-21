@@ -2,36 +2,49 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/mail"
 
 	"github.com/google/uuid"
 	"github.com/yoshapihoff/bricks/auth/internal/auth"
-	"github.com/yoshapihoff/bricks/auth/internal/domain"
+	"github.com/yoshapihoff/bricks/auth/internal/dto"
+	"github.com/yoshapihoff/bricks/auth/internal/repository"
 	"golang.org/x/crypto/bcrypt"
 )
 
 var (
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrEmailExists        = errors.New("email already in use")
-	ErrInvalidEmail       = errors.New("invalid email")
-	ErrWeakPassword       = errors.New("password is too weak")
-	ErrUserNotFound       = errors.New("user not found")
+	ErrUserNotFound    = errors.New("user not found")
+	ErrEmailExists     = errors.New("email already exists")
+	ErrInvalidEmail    = errors.New("invalid email")
+	ErrInvalidPassword = errors.New("invalid password")
+	ErrWeakPassword    = errors.New("password is too weak")
 )
 
-type UserService struct {
-	userRepo domain.UserRepository
-	jwtSvc   *auth.JWTService
+type UserService interface {
+	Register(ctx context.Context, email, password, name string) (*dto.User, error)
+	Login(ctx context.Context, email, password string) (string, error)
+	ValidateToken(ctx context.Context, tokenString string) (*dto.User, error)
+	LoginByID(ctx context.Context, userID uuid.UUID) (string, error)
+	GetProfile(ctx context.Context, userID uuid.UUID) (*dto.User, error)
+	UpdateEmail(ctx context.Context, userID uuid.UUID, email string) error
+	UpdatePassword(ctx context.Context, userID uuid.UUID, oldPassword, newPassword string) error
+	GetUserByEmail(ctx context.Context, email string) (*dto.User, error)
 }
 
-func NewUserService(userRepo domain.UserRepository, jwtSvc *auth.JWTService) *UserService {
-	return &UserService{
+type DefaultUserService struct {
+	userRepo repository.UserRepository
+	jwtSvc   auth.JWTService
+}
+
+func NewUserService(userRepo repository.UserRepository, jwtSvc auth.JWTService) *DefaultUserService {
+	return &DefaultUserService{
 		userRepo: userRepo,
 		jwtSvc:   jwtSvc,
 	}
 }
 
-func (s *UserService) Register(ctx context.Context, email, password, name string) (*domain.User, error) {
+func (s *DefaultUserService) Register(ctx context.Context, email, password, name string) (*dto.User, error) {
 	if len(password) < 8 {
 		return nil, ErrWeakPassword
 	}
@@ -41,23 +54,20 @@ func (s *UserService) Register(ctx context.Context, email, password, name string
 		return nil, ErrInvalidEmail
 	}
 
-	// Check if user already exists
 	existingUser, err := s.userRepo.FindByEmail(ctx, email)
-	if err != nil && !errors.Is(err, domain.ErrUserNotFound) {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	if existingUser != nil {
 		return nil, ErrEmailExists
 	}
 
-	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create user
-	user := &domain.User{
+	user := &dto.User{
 		ID:           uuid.New(),
 		Email:        email,
 		PasswordHash: string(hashedPassword),
@@ -67,42 +77,38 @@ func (s *UserService) Register(ctx context.Context, email, password, name string
 		return nil, err
 	}
 
-	// Note: Token generation is now handled in the handler layer
 	return user, nil
 }
 
-func (s *UserService) Login(ctx context.Context, email, password string) (string, error) {
+func (s *DefaultUserService) Login(ctx context.Context, email, password string) (string, error) {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
-		if errors.Is(err, domain.ErrUserNotFound) {
-			return "", ErrInvalidCredentials
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrInvalidEmail
 		}
 		return "", err
 	}
 
-	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
-		return "", ErrInvalidCredentials
+		return "", ErrInvalidPassword
 	}
 
-	// Generate JWT token
 	return s.jwtSvc.GenerateToken(user.ID, user.Email)
 }
 
-func (s *UserService) LoginByID(ctx context.Context, userID uuid.UUID) (string, error) {
+func (s *DefaultUserService) LoginByID(ctx context.Context, userID uuid.UUID) (string, error) {
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
-		if errors.Is(err, domain.ErrUserNotFound) {
-			return "", ErrInvalidCredentials
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrUserNotFound
 		}
 		return "", err
 	}
 
-	// Generate JWT token
 	return s.jwtSvc.GenerateToken(user.ID, user.Email)
 }
 
-func (s *UserService) ValidateToken(ctx context.Context, tokenString string) (*domain.User, error) {
+func (s *DefaultUserService) ValidateToken(ctx context.Context, tokenString string) (*dto.User, error) {
 	claims, err := s.jwtSvc.ValidateToken(tokenString)
 	if err != nil {
 		return nil, err
@@ -110,17 +116,28 @@ func (s *UserService) ValidateToken(ctx context.Context, tokenString string) (*d
 
 	user, err := s.userRepo.FindByID(ctx, claims.UserID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
 		return nil, err
 	}
 
 	return user, nil
 }
 
-func (s *UserService) GetProfile(ctx context.Context, userID uuid.UUID) (*domain.User, error) {
-	return s.userRepo.FindByID(ctx, userID)
+func (s *DefaultUserService) GetProfile(ctx context.Context, userID uuid.UUID) (*dto.User, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+
+	return user, nil
 }
 
-func (s *UserService) UpdateEmail(ctx context.Context, userID uuid.UUID, email string) error {
+func (s *DefaultUserService) UpdateEmail(ctx context.Context, userID uuid.UUID, email string) error {
 	_, err := mail.ParseAddress(email)
 	if err != nil {
 		return ErrInvalidEmail
@@ -128,7 +145,7 @@ func (s *UserService) UpdateEmail(ctx context.Context, userID uuid.UUID, email s
 
 	_, err = s.userRepo.FindByID(ctx, userID)
 	if err != nil {
-		if errors.Is(err, domain.ErrUserNotFound) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return ErrUserNotFound
 		}
 		return err
@@ -137,26 +154,23 @@ func (s *UserService) UpdateEmail(ctx context.Context, userID uuid.UUID, email s
 	return s.userRepo.UpdateEmail(ctx, userID, email)
 }
 
-func (s *UserService) UpdatePassword(ctx context.Context, userID uuid.UUID, oldPassword, newPassword string) error {
+func (s *DefaultUserService) UpdatePassword(ctx context.Context, userID uuid.UUID, oldPassword, newPassword string) error {
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
-		if errors.Is(err, domain.ErrUserNotFound) {
-			return ErrInvalidCredentials
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrUserNotFound
 		}
 		return err
 	}
 
-	// Verify old password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
-		return ErrInvalidCredentials
+		return ErrInvalidPassword
 	}
 
-	// Validate new password
 	if len(newPassword) < 8 {
 		return ErrWeakPassword
 	}
 
-	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
@@ -165,7 +179,14 @@ func (s *UserService) UpdatePassword(ctx context.Context, userID uuid.UUID, oldP
 	return s.userRepo.UpdatePasswordHash(ctx, userID, string(hashedPassword))
 }
 
-// GetUserByEmail retrieves a user by their email address
-func (s *UserService) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
-	return s.userRepo.FindByEmail(ctx, email)
+func (s *DefaultUserService) GetUserByEmail(ctx context.Context, email string) (*dto.User, error) {
+	user, err := s.userRepo.FindByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+
+	return user, nil
 }
